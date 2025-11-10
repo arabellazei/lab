@@ -28,7 +28,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     IDX_RARM = robot.model.getFrameId(RIGHT_HAND)
     IDX_LARM = robot.model.getFrameId(LEFT_HAND)
 
-    q = q0.copy()
+    q = robot.q0.copy()
     herr_r = [] # Log the value of the error between right hand and right target.
     herr_l = [] # Log the value of the error between left hand and left target.
     
@@ -74,7 +74,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         herr_r.append(right_nu)
         herr_l.append(left_nu) 
 
-    return q
+    return q, True
 
 
 
@@ -88,7 +88,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
 if __name__ == "__main__":
     from tools import setupwithmeshcat
     from setup_meshcat import updatevisuals
-    robot, cube, viz = setupwithmeshcat()
+    robot, cube, viz = setupwithmeshcat(url="tcp://127.0.0.1:6005")
     
     q = robot.q0.copy()
     
