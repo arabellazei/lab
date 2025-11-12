@@ -16,11 +16,27 @@ import time
 
 from tools import setcubeplacement
 
+def damped_pinv(J, lam=1e-3):
+    # 6xnv Jacobian -> nvx6 pseudo-inverse with Tikhonov damping
+    # J# = J^T ( J J^T + lam^2 I )^{-1}
+    JJt = J @ J.T
+    return J.T @ inv(JJt + (lam**2) * np.eye(J.shape[0]))
+
+
 def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     '''Return a collision free configuration grasping a cube at a specific location and a success flag'''
     setcubeplacement(robot, cube, cubetarget)
-  
-    DT = 1/48
+
+    # controller parameters
+    DT = 1/120      # smaller steps for stability
+    KP = 2.0        # SE(3) twist gain
+    LAMBDA = 1e-4   # Damping for pseudoinverse
+    VMAX = 0.8
+
+    # convergence thresholds
+    TOL_ROT = 2e-2
+    TOL_LIN = 2e-3
+    MAX_IT = 800
     
     oMcubeL = getcubeplacement(cube, LEFT_HOOK) #placement of the left hand hook
     oMcubeR = getcubeplacement(cube, RIGHT_HOOK) #placement of the right hand hook
@@ -32,10 +48,13 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     herr_r = [] # Log the value of the error between right hand and right target.
     herr_l = [] # Log the value of the error between left hand and left target.
     
-    for i in range(300):  # Integrate over 3 second of robot life
+    updatevisuals(viz, robot, cube, q)
+
+    for it in range(MAX_IT):  # Integrate over 3 second of robot life
 
         pin.framesForwardKinematics(robot.model,robot.data,q)
         pin.computeJointJacobians(robot.model,robot.data,q)
+        pin.updateFramePlacements(robot.model, robot.data)
 
         # Current EE poses
         oMleft = robot.data.oMf[IDX_LARM]
@@ -48,33 +67,63 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         rhandMhook = oMright.inverse() * oMcubeR
         right_nu = pin.log(rhandMhook).vector
 
+        # ---- convergence test ----
+        if (np.linalg.norm(left_nu[:3])  < TOL_ROT and 
+            np.linalg.norm(left_nu[3:])  < TOL_LIN and
+            np.linalg.norm(right_nu[:3]) < TOL_ROT and 
+            np.linalg.norm(right_nu[3:]) < TOL_LIN):
+
+            if not collision(robot, q):
+                print(f"[IK] converged after {it} iterations.")
+                if viz is not None:
+                    viz.display(q)
+                return q, True
+            
+            else:
+                # TODO collision clearance
+                return
+
+        # Desired local twists
+        vstar_L = KP * left_nu
+        vstar_R = KP * right_nu
+
         # 6D Jacobians in local frames
-        left_Jleft = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_LARM)
-        right_Jright = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_RARM)
+        left_Jleft = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_LARM, pin.ReferenceFrame.LOCAL)
+        right_Jright = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_RARM, pin.ReferenceFrame.LOCAL)
         
         # Primary task (right hand)
-        vq = - pinv(right_Jright) @ right_nu
+        JR = damped_pinv(right_Jright, LAMBDA)
+        vq = JR @ vstar_R
 
         # Null-space projector for right-hand task
-        Pright = np.eye(robot.nv) - pinv(right_Jright) @ right_Jright
+        Pright = np.eye(robot.nv) - JR @ right_Jright
 
         # Secondary task (left hand)
-        vq += - pinv(left_Jleft @ Pright) @ (left_nu + left_Jleft @ vq)
+        left_Jleft_Pright = left_Jleft @ Pright
+        JL = damped_pinv(left_Jleft_Pright, LAMBDA)
+        #vq += - pinv(JL @ Pright) @ (left_nu + JL @ vq)
+        vq += Pright @ (JL @ (vstar_L - left_Jleft @ vq))
 
         # # Control law by least square - FIX
         # vq = pinv(right_Jright) @ right_nu
         # Pright = np.eye(robot.nv)-pinv(right_Jright) @ right_Jright
         # vq += pinv(left_Jleft @ Pright) @ (left_nu @ vq)
 
+        #vq = np.clip(vq, , VMAX)
+
         q = pin.integrate(robot.model, q, vq * DT)
+        q = projecttojointlimits(robot, q)
 
         viz.display(q)
-        time.sleep(1e-3)
+        #time.sleep(1e-3)
 
         herr_r.append(right_nu)
         herr_l.append(left_nu) 
 
-    return q, True
+    # failed to converge
+    print("IK did not converge within iteration limit")
+    return q, False
+
 
 
 
