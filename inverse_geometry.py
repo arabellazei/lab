@@ -24,9 +24,9 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
                                   cube.collision_model, cube.collision_data, cube.q0)
 
     left_hook_id = cube.model.getFrameId(LEFT_HOOK)
+    oMlhook = cubetarget * cube.data.oMf[left_hook_id]
+    
     right_hook_id = cube.model.getFrameId(RIGHT_HOOK)
-
-    oMlhook = cubetarget * cube.data.oMf[left_hook_id] # ?
     oMrhook = cubetarget * cube.data.oMf[right_hook_id]
 
     left_hand_id = robot.model.getFrameId(LEFT_HAND)
@@ -35,20 +35,23 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     q = qcurrent.copy()
 
     max_iterations = 1000
-    epsilon = 1e-4
+    epsilon = EPSILON
     step_size = 0.5
 
+    # For-loop to do inverse kinematics
     for i in range(max_iterations):
         pin.framesForwardKinematics(robot.model, robot.data, q)
 
         oMlhand = robot.data.oMf[left_hand_id]
         oMrhand = robot.data.oMf[right_hand_id]
 
-        left_error = pin.log(oMlhand.inverse() * oMlhook).vector # inverse of matrix
+        # calculate the error
+        left_error = pin.log(oMlhand.inverse() * oMlhook).vector
         right_error = pin.log(oMrhand.inverse() * oMrhook).vector
 
+        # collion with anything in the env
         if norm(left_error) < epsilon and norm(right_error) < epsilon:
-            if not collision(robot, q): # collion with anything in the env
+            if not collision(robot, q):
                 if viz:
                     viz.display(q)
                 return q, True
@@ -62,8 +65,9 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         error = np.concatenate([left_error, right_error])
         J = np.vstack([J_left, J_right])
 
-        damping = 1e-6
-        J_pinv = J.T @ inv(J @ J.T + damping * np.eye(J.shape[0])) # damped psuedo inv
+        # damped psuedo inv
+        dampingFactor = 1e-6
+        J_pinv = J.T @ inv(J @ J.T + dampingFactor * np.eye(J.shape[0]))
 
         dq_task = J_pinv @ error
 
@@ -75,8 +79,10 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
 
         q = q + step_size * dq
 
+        # Make sure it does violate physical joint limits
         q = projecttojointlimits(robot, q)
 
+    # To try and wiggle out in case of collison
     max_escape_iter = 200
     for i in range(max_escape_iter):
         if not collision(robot, q):
