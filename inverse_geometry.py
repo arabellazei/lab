@@ -17,6 +17,21 @@ from setup_meshcat import updatevisuals
 
 from tools import setcubeplacement
 
+import quadprog
+
+def solve_qp(H, f, lb, ub):
+    # quadprog solves: min 1/2 xᵀ H x - bᵀ x
+    # so we pass b = -f
+    n = H.shape[0]
+
+    # inequality: lb <= x <= ub   →   Gx ≤ h
+    G = np.vstack(( np.eye(n), -np.eye(n) ))
+    h = np.hstack(( ub, -lb ))
+
+    sol = quadprog.solve_qp(H, -f, G.T, h)[0]
+    return sol
+
+
 def damped_pinv(J, lam=1e-3):
     # 6xnv Jacobian -> nvx6 pseudo-inverse with Tikhonov damping
     # J# = J^T ( J J^T + lam^2 I )^{-1}
@@ -29,8 +44,8 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     setcubeplacement(robot, cube, cubetarget)
 
     # controller parameters
-    DT = 1/120      # smaller steps for stability
-    KP = 2.0        # SE(3) twist gain
+    DT = 1/50      # smaller steps for stability
+    KP = 4.0        # SE(3) twist gain
     LAMBDA = 1e-4   # Damping for pseudoinverse
     VMAX = 0.8
 
@@ -91,6 +106,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         left_Jleft = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_LARM, pin.ReferenceFrame.LOCAL)
         right_Jright = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_RARM, pin.ReferenceFrame.LOCAL)
         
+        #-------
         # Primary task (right hand)
         JR = damped_pinv(right_Jright, LAMBDA)
         vq = JR @ vstar_R
@@ -103,11 +119,33 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         JL = damped_pinv(left_Jleft_Pright, LAMBDA)
         #vq += - pinv(JL @ Pright) @ (left_nu + JL @ vq)
         vq += Pright @ (JL @ (vstar_L - left_Jleft @ vq))
+        #-------
 
-        # # Control law by least square - FIX
-        # vq = pinv(right_Jright) @ right_nu
-        # Pright = np.eye(robot.nv)-pinv(right_Jright) @ right_Jright
-        # vq += pinv(left_Jleft @ Pright) @ (left_nu @ vq)
+        # Build QP terms -----------------
+
+        # JR = right_Jright
+        # JL = left_Jleft
+
+        # alpha = 0.2         # weight for left hand
+        # beta = 0.01          # postural weight
+        # Kposture = 0.3
+
+        # # Cost matrices
+        # H = (JR.T @ JR) + alpha*(JL.T @ JL) + beta*np.eye(robot.nv) + 1e-6 * np.eye(robot.nv)
+        # f = -(JR.T @ vstar_R) - alpha*(JL.T @ vstar_L) - beta*(Kposture*(robot.q0 - q))
+
+        # # Joint limit constraints in velocity space
+        # qmin = robot.model.lowerPositionLimit
+        # qmax = robot.model.upperPositionLimit
+
+        # lb = (qmin - q) / DT
+        # ub = (qmax - q) / DT
+
+        # # Solve QP
+    
+        # vq = solve_qp(H, f, lb, ub)
+        #     #vq = solve_qp_slsqp(H, f, lb, ub)
+        # ----- end of qp
 
         #vq = np.clip(vq, , VMAX)
 
@@ -137,7 +175,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
 if __name__ == "__main__":
     from tools import setupwithmeshcat
     from setup_meshcat import updatevisuals
-    robot, cube, viz = setupwithmeshcat(url="tcp://127.0.0.1:6005")
+    robot, cube, viz = setupwithmeshcat(url="tcp://127.0.0.1:6000")
     
     q = robot.q0.copy()
     
