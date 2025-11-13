@@ -52,7 +52,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     # convergence thresholds
     TOL_ROT = 2e-2
     TOL_LIN = 2e-3
-    MAX_IT = 800
+    MAX_IT = 200
     
     oMcubeL = getcubeplacement(cube, LEFT_HOOK) #placement of the left hand hook
     oMcubeR = getcubeplacement(cube, RIGHT_HOOK) #placement of the right hand hook
