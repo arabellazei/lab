@@ -13,6 +13,7 @@ from tools import collision, getcubeplacement, setcubeplacement, projecttojointl
 from config import LEFT_HOOK, RIGHT_HOOK, LEFT_HAND, RIGHT_HAND, EPSILON
 from config import CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET
 import time
+from setup_meshcat import updatevisuals
 
 from tools import setcubeplacement
 
@@ -80,8 +81,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
                 return q, True
             
             else:
-                # TODO collision clearance
-                return
+                return q, False
 
         # Desired local twists
         vstar_L = KP * left_nu
