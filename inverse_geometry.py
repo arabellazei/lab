@@ -47,12 +47,11 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     DT = 1/50      # smaller steps for stability
     KP = 10.0        # SE(3) twist gain
     LAMBDA = 1e-4   # Damping for pseudoinverse
-    VMAX = 0.8
 
     # convergence thresholds
     TOL_ROT = 2e-2
     TOL_LIN = 2e-3
-    MAX_IT = 100
+    MAX_IT = 60
     
     oMcubeL = getcubeplacement(cube, LEFT_HOOK) #placement of the left hand hook
     oMcubeR = getcubeplacement(cube, RIGHT_HOOK) #placement of the right hand hook
@@ -65,7 +64,8 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     herr_r = [] # Log the value of the error between right hand and right target.
     herr_l = [] # Log the value of the error between left hand and left target.
     
-    updatevisuals(viz, robot, cube, q)
+    if viz is not None:
+        updatevisuals(viz, robot, cube, q)
 
     for it in range(MAX_IT):  # Integrate over 3 second of robot life
 
@@ -122,38 +122,11 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         vq += Pright @ (JL @ (vstar_L - left_Jleft @ vq))
         #-------
 
-        # Build QP terms -----------------
-
-        # JR = right_Jright
-        # JL = left_Jleft
-
-        # alpha = 0.2         # weight for left hand
-        # beta = 0.01          # postural weight
-        # Kposture = 0.3
-
-        # # Cost matrices
-        # H = (JR.T @ JR) + alpha*(JL.T @ JL) + beta*np.eye(robot.nv) + 1e-6 * np.eye(robot.nv)
-        # f = -(JR.T @ vstar_R) - alpha*(JL.T @ vstar_L) - beta*(Kposture*(robot.q0 - q))
-
-        # # Joint limit constraints in velocity space
-        # qmin = robot.model.lowerPositionLimit
-        # qmax = robot.model.upperPositionLimit
-
-        # lb = (qmin - q) / DT
-        # ub = (qmax - q) / DT
-
-        # # Solve QP
-    
-        # vq = solve_qp(H, f, lb, ub)
-        #     #vq = solve_qp_slsqp(H, f, lb, ub)
-        # ----- end of qp
-
-        #vq = np.clip(vq, , VMAX)
-
         q = pin.integrate(robot.model, q, vq * DT)
         q = projecttojointlimits(robot, q)
 
-        viz.display(q)
+        if viz is not None:
+            viz.display(q)
         #time.sleep(1e-3)
 
         herr_r.append(right_nu)
@@ -163,15 +136,6 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     print("IK did not converge within iteration limit")
     return q, False
 
-
-
-
-
-
-
-
-    # print ("TODO: implement me")
-    # return robot.q0, False
             
 if __name__ == "__main__":
     from tools import setupwithmeshcat
