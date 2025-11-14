@@ -44,10 +44,23 @@ def sample_random_SE3():
         r = np.random.rand() ** (1/3) * RADIUS  # uniform in volume
         pos = mid_pos + r * v                   # sampled position
 
+        # dx = pos[0] - robot_base[0]
+        # dy = pos[1] - robot_base[1]
+        # radial_dist = np.sqrt(dx*dx + dy*dy)
+
         dist = np.linalg.norm(pos - chest_pos)
+
+        # print("sample pos = ", pos)
+        # print("  z ok? ", pos[2] >= TABLE_Z)
+        # print("  radial = ", radial_dist, " radial_ok? ", radial_dist > MIN_REACH)
+        # print("  dist = ", dist, " dist_ok? ", dist < MAX_REACH)
+
         # table condition
         if pos[2] < TABLE_Z:
             continue
+
+        # if not (MIN_REACH < radial_dist):
+        #     continue
 
         # reachability condition
         if not (MIN_REACH < dist < MAX_REACH):
@@ -73,12 +86,12 @@ def RAND_CONF(robot, q, cube, viz = None):
         if success: 
             return q_rand, oMcube_rand
     
-def NEAREST_VERTEX(G, oMcube):
+def NEAREST_VERTEX(G, q_rand):
     """ Return the graph index of the node that has the nearest q in the config space """
     min_dist = 10e4
     idx = -1
     for (i, node) in enumerate(G):
-        dist = np.linalg.norm(oMcube.translation - node[2].translation) 
+        dist = np.linalg.norm(q_rand - node[1]) 
         if dist < min_dist:
             min_dist = dist
             idx = i
@@ -88,80 +101,84 @@ def lerp(q0,q1,t):
     """ Linear interpolation """
     return q0 * (1 - t) + q1 * t
 
-def NEW_CONF(cube_near, cube_rand, q_near, discretisationsteps, delta_q = None):
+def NEW_CONF(q_near, q_rand, discretisationsteps, delta_q = None):
     """ Return the closest configuration q_new such that the path q_near => q_new is the longest
     along the linear interpolation (q_near,q_rand) that is collision free and of length <  delta_q """
-    cube_end = cube_rand.copy()
-    R = cube_end.rotation
-    dist = np.linalg.norm(cube_rand.translation - cube_near.translation)
-    print("Dist: ", dist)
+    q_end = q_rand.copy()
+    dist = np.linalg.norm(q_rand - q_near)
     if delta_q is not None and dist > delta_q:
         #compute the configuration that corresponds to a path of length delta_q
-        cube_end_pos = lerp(cube_near.translation, cube_rand.translation, delta_q/dist)
-        cube_end = pin.SE3(R, cube_end_pos)
+        q_end = lerp(q_near, q_rand, delta_q/dist)
         # now dist == delta_q
     dt = 1 / discretisationsteps
 
+    #--
+    # Save current cube pose
+    saved_cube_pose = getcubeplacement(cube)
+    # Move cube far away (e.g. below the floor)
+    fake_pose = pin.SE3(saved_cube_pose.rotation.copy(),
+                        saved_cube_pose.translation.copy())
+    fake_pose.translation[2] -= 10.0   # 10m under the table
+    setcubeplacement(robot, cube, fake_pose)
+    #--
 
     print("checking collision free path")
-    #q_prev = q_near.copy()
-    path = []
-    flag = True
-
     for i in range(1, discretisationsteps):
-        R = cube_near.rotation
-        cube_pos = lerp(cube_near.translation, cube_end.translation, dt*i)
-        cube_i = pin.SE3(R, cube_pos)
-        setcubeplacement(robot, cube, cube_i)
-        q, success = computeqgrasppose(robot, robot.q0, cube, cube_i)
-        cube_ok = not pin.computeCollisions(cube.collision_model, cube.collision_data, False)
+        q = lerp(q_near,q_end,dt*i)
+        if collision(robot, q):
+            print("collision for q: ", q)
+            return lerp(q_near,q_end,dt*(i-1))
         
-        if not (success and cube_ok):
-            print("collision")
-            flag = False
-            break
-        # collision free
-        path.append((q, cube_i))
-    print("Path section length : ", len(path))   
-    return path, flag
+    #--
+    # Restore cube pose
+    setcubeplacement(robot, cube, saved_cube_pose)
+    #--
+    return q_end
  
 
-def ADD_PATH_SECTION(G, parent, section):
-    current_parent = parent
-    for (q, cube_pos) in section:
-        new_node_index = len(G)
-        G.append((current_parent, q, cube_pos))
-        current_parent = new_node_index
+def ADD_EDGE_AND_VERTEX(G, parent, q, oMcube):
+    node = [(parent, q, oMcube)]
+    print("adding to graph: ", node)
+    G += node
 
-def VALID_EDGE(cube_new, cube_goal, q, discretisationsteps):
+def VALID_EDGE(q_new, q_goal, discretisationsteps):
     print("checking path to goal")
-    path, flag = NEW_CONF(cube_new, cube_goal, q, discretisationsteps)
-    return path, flag
+    return np.linalg.norm(q_goal - NEW_CONF(q_new, q_goal, discretisationsteps)) < 1e-3
 
 def rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
     """ This is the RRT algorithm engine """
     G = [(None, qinit, cubeplacementq0)]    # each node of graph stores (Parent, configuration, cube position)
     k = 1000    # number of nodes. Can be adjusted
-    delta_q = 0.2
-    discretisationsteps = 80
+    delta_q = 3
+    discretisationsteps = 20
 
     for _ in range(k):
-        print("Graph length =", len(G))
-        q_rand, cube_rand = RAND_CONF(robot, q, cube)
-        cube_near_index = NEAREST_VERTEX(G, cube_rand)
-        _, q_near, cube_near = G[cube_near_index]   
-        new_G_section, _ = NEW_CONF(cube_near, cube_rand, q_near, discretisationsteps, delta_q)    
-        if new_G_section == []: continue
-        ADD_PATH_SECTION(G, cube_near_index, new_G_section)
-        q_new, cube_new = new_G_section[-1][0], new_G_section[-1][1], 
-        to_goal_section, flag = VALID_EDGE(cube_new, cubeplacementqgoal, q_new, discretisationsteps)
-        if flag:    
+        print("Graph: ", G)
+        q_rand, oMcube = RAND_CONF(robot, q, cube)
+        q_near_index = NEAREST_VERTEX(G, q_rand)
+        q_near = G[q_near_index][1]   
+        q_new = NEW_CONF(q_near,q_rand,discretisationsteps, delta_q)    
+        ADD_EDGE_AND_VERTEX(G, q_near_index, q_new, oMcube)
+        if VALID_EDGE(q_new, qgoal, discretisationsteps):
             print ("Path found!")
-            ADD_PATH_SECTION(G, len(G)-1, to_goal_section)
+            ADD_EDGE_AND_VERTEX(G, len(G)-1, qgoal, cubeplacementqgoal)
             return G, True
     print("path not found")
     return G, False    
-
+     
+def path_outline(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
+    G, pathfound = rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal)
+    
+    path = []
+    cube_path = []
+    node = G[-1]
+    while node[0] is not None:
+        path = [node[1]] + path
+        cube_path = [node[2]] + cube_path
+        node = G[node[0]]
+    path = [G[0][1]] + path
+    cube_path = [G[0][2]] + cube_path
+    return path, cube_path
 
 def interpolate_SE3(T1: pin.SE3, T2: pin.SE3, alpha: float) -> pin.SE3:
     """Interpolate between two SE3 poses: 
@@ -178,29 +195,43 @@ def interpolate_SE3(T1: pin.SE3, T2: pin.SE3, alpha: float) -> pin.SE3:
 
     return pin.SE3(q_interp.toRotationMatrix(), p)
 
+def densify_cube_path(cube_path, steps_per_segment = 10):
+    dense = []
+    for i in range(len(cube_path) - 1):
+        T1 = cube_path[i]
+        T2 = cube_path[i+1]
+        dense.append(T1)
+
+        for k in range(1, steps_per_segment):
+            alpha = k / steps_per_segment
+            dense.append(interpolate_SE3(T1, T2, alpha))
+    
+    dense.append(cube_path[-1])
+    return dense
+
 #returns a collision free path from qinit to qgoal under grasping constraints
 #the path is expressed as a list of configurations
 def computepath(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
-    G, pathfound = rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal)
+    path, cube_path = path_outline(qinit, qgoal, cubeplacementq0, cubeplacementqgoal)
+    dense_cube_path = densify_cube_path(cube_path)
+    dense_path = []
+    q_prev = path[0]
+
+    for cube_pose in dense_cube_path:
+        q, ok = computeqgrasppose(robot, q_prev, cube, cube_pose, viz)
+        if not ok: 
+            print("IK failed at cube pose: ", cube_pose)
+        dense_path.append(q.copy())
+        q_prev = q.copy()
     
-    path = []
-    cube_path = []
-    node = G[-1]
-    while node[0] is not None:
-        path = [node[1]] + path
-        cube_path = [node[2]] + cube_path
-        node = G[node[0]]
-    path = [G[0][1]] + path
-    cube_path = [G[0][2]] + cube_path
-    return path, cube_path
+    return dense_path, dense_cube_path
+        
 
-
-def displaypath(robot, path, cube_path, dt, viz):
+def displaypath(robot, path, cube_path, dt,viz):
     for i, q in enumerate(path):
         setcubeplacement(robot, cube, cube_path[i])
         viz.display(q)
-        #print("step, ", q)
-        #time.sleep(0.000001)
+        time.sleep(dt)
 
 
 if __name__ == "__main__":
@@ -220,5 +251,5 @@ if __name__ == "__main__":
     
     path, cube_path = computepath(q0, qe, CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET)
     
-    displaypath(robot,path,cube_path, dt=0.5, viz=viz) #you ll probably want to lower dt
+    displaypath(robot,path,cube_path,dt=0.5,viz=viz) #you ll probably want to lower dt
     
