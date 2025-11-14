@@ -21,15 +21,21 @@ def sample_random_SE3():
     # --- settings
     TABLE_Z = CUBE_PLACEMENT.translation[2]
     RADIUS = 0.3
-    MAX_REACH = 1.2
+    MAX_REACH = 1
     MIN_REACH = 0.2
     MAX_TRIES = 100
 
     # midpoint between start and goal
     mid_pos = 0.5 * (CUBE_PLACEMENT.translation + CUBE_PLACEMENT_TARGET.translation)
 
+    # robot chest position
+    CHEST_FRAME = "CHEST_JOINT0_Link"
+    CHEST_ID = robot.model.getFrameId(CHEST_FRAME)
+    pin.framesForwardKinematics(robot.model, robot.data, q)
+    chest_pos = robot.data.oMf[CHEST_ID].translation
+
     # robot base position (world frame)
-    robot_base = robot.data.oMf[1].translation.copy()
+    #robot_base = robot.data.oMf[1].translation.copy()
 
     for _ in range(MAX_TRIES):
         # random direction inside unit sphere
@@ -38,11 +44,11 @@ def sample_random_SE3():
         r = np.random.rand() ** (1/3) * RADIUS  # uniform in volume
         pos = mid_pos + r * v                   # sampled position
 
-        dx = pos[0] - robot_base[0]
-        dy = pos[1] - robot_base[1]
-        radial_dist = np.sqrt(dx*dx + dy*dy)
+        # dx = pos[0] - robot_base[0]
+        # dy = pos[1] - robot_base[1]
+        # radial_dist = np.sqrt(dx*dx + dy*dy)
 
-        dist = np.linalg.norm(pos - robot_base)
+        dist = np.linalg.norm(pos - chest_pos)
 
         # print("sample pos = ", pos)
         # print("  z ok? ", pos[2] >= TABLE_Z)
@@ -53,11 +59,11 @@ def sample_random_SE3():
         if pos[2] < TABLE_Z:
             continue
 
-        if not (MIN_REACH < radial_dist):
-            continue
+        # if not (MIN_REACH < radial_dist):
+        #     continue
 
         # reachability condition
-        if not (dist < MAX_REACH):
+        if not (MIN_REACH < dist < MAX_REACH):
             continue
 
         # identity rotation for now
@@ -128,7 +134,6 @@ def NEW_CONF(q_near, q_rand, discretisationsteps, delta_q = None):
     setcubeplacement(robot, cube, saved_cube_pose)
     #--
     return q_end
-    
  
 
 def ADD_EDGE_AND_VERTEX(G, parent, q, oMcube):
@@ -161,10 +166,7 @@ def rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
     print("path not found")
     return G, False    
      
-
-#returns a collision free path from qinit to qgoal under grasping constraints
-#the path is expressed as a list of configurations
-def computepath(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
+def path_outline(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
     G, pathfound = rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal)
     
     path = []
@@ -178,13 +180,58 @@ def computepath(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
     cube_path = [G[0][2]] + cube_path
     return path, cube_path
 
+def interpolate_SE3(T1: pin.SE3, T2: pin.SE3, alpha: float) -> pin.SE3:
+    """Interpolate between two SE3 poses: 
+       linear position + quaternion slerp for rotation."""
+    # Linear interpolation for position
+    p1 = T1.translation
+    p2 = T2.translation
+    p = (1 - alpha) * p1 + alpha * p2
+
+    # Quaternion slerp
+    q1 = pin.Quaternion(T1.rotation)
+    q2 = pin.Quaternion(T2.rotation)
+    q_interp = q1.slerp(alpha, q2)
+
+    return pin.SE3(q_interp.toRotationMatrix(), p)
+
+def densify_cube_path(cube_path, steps_per_segment = 10):
+    dense = []
+    for i in range(len(cube_path) - 1):
+        T1 = cube_path[i]
+        T2 = cube_path[i+1]
+        dense.append(T1)
+
+        for k in range(1, steps_per_segment):
+            alpha = k / steps_per_segment
+            dense.append(interpolate_SE3(T1, T2, alpha))
+    
+    dense.append(cube_path[-1])
+    return dense
+
+#returns a collision free path from qinit to qgoal under grasping constraints
+#the path is expressed as a list of configurations
+def computepath(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
+    path, cube_path = path_outline(qinit, qgoal, cubeplacementq0, cubeplacementqgoal)
+    dense_cube_path = densify_cube_path(cube_path)
+    dense_path = []
+    q_prev = path[0]
+
+    for cube_pose in dense_cube_path:
+        q, ok = computeqgrasppose(robot, q_prev, cube, cube_pose, viz)
+        if not ok: 
+            print("IK failed at cube pose: ", cube_pose)
+        dense_path.append(q.copy())
+        q_prev = q.copy()
+    
+    return dense_path, dense_cube_path
+        
 
 def displaypath(robot, path, cube_path, dt,viz):
     for i, q in enumerate(path):
         setcubeplacement(robot, cube, cube_path[i])
         viz.display(q)
         time.sleep(dt)
-    
 
 
 if __name__ == "__main__":

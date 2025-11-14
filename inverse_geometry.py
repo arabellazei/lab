@@ -45,14 +45,14 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
 
     # controller parameters
     DT = 1/50      # smaller steps for stability
-    KP = 4.0        # SE(3) twist gain
+    KP = 10.0        # SE(3) twist gain
     LAMBDA = 1e-4   # Damping for pseudoinverse
     VMAX = 0.8
 
     # convergence thresholds
     TOL_ROT = 2e-2
     TOL_LIN = 2e-3
-    MAX_IT = 200
+    MAX_IT = 100
     
     oMcubeL = getcubeplacement(cube, LEFT_HOOK) #placement of the left hand hook
     oMcubeR = getcubeplacement(cube, RIGHT_HOOK) #placement of the right hand hook
@@ -60,7 +60,8 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     IDX_RARM = robot.model.getFrameId(RIGHT_HAND)
     IDX_LARM = robot.model.getFrameId(LEFT_HAND)
 
-    q = robot.q0.copy()
+    q = qcurrent.copy()
+    # q = robot.q0.copy()
     herr_r = [] # Log the value of the error between right hand and right target.
     herr_l = [] # Log the value of the error between left hand and left target.
     
