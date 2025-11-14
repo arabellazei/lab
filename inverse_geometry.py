@@ -91,7 +91,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
             np.linalg.norm(right_nu[3:]) < TOL_LIN):
 
             if not collision(robot, q):
-                print(f"[IK] converged after {it} iterations.")
+                #print(f"[IK] converged after {it} iterations.")
                 if viz is not None:
                     viz.display(q)
                 return q, True

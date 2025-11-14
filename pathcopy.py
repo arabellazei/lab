@@ -88,37 +88,41 @@ def lerp(q0,q1,t):
     """ Linear interpolation """
     return q0 * (1 - t) + q1 * t
 
-def NEW_CONF(cube_near, oMcube, q_rand, discretisationsteps, delta_q = None):
+def NEW_CONF(cube_near, cube_rand, q_near, discretisationsteps, delta_q = None):
     """ Return the closest configuration q_new such that the path q_near => q_new is the longest
     along the linear interpolation (q_near,q_rand) that is collision free and of length <  delta_q """
-    cube_end = oMcube.copy()
-    dist = np.linalg.norm(oMcube.translation - cube_near.translation)
+    cube_end = cube_rand.copy()
+    R = cube_end.rotation
+    dist = np.linalg.norm(cube_rand.translation - cube_near.translation)
+    print("Dist: ", dist)
     if delta_q is not None and dist > delta_q:
         #compute the configuration that corresponds to a path of length delta_q
-        cube_end = lerp(cube_near.translation, oMcube.translation, delta_q/dist)
+        cube_end_pos = lerp(cube_near.translation, cube_rand.translation, delta_q/dist)
+        cube_end = pin.SE3(R, cube_end_pos)
         # now dist == delta_q
     dt = 1 / discretisationsteps
 
 
     print("checking collision free path")
-    q_prev = q_rand.copy()
-    path = [(q_prev, oMcube)]
+    #q_prev = q_near.copy()
+    path = []
     flag = True
 
     for i in range(1, discretisationsteps):
         R = cube_near.rotation
-        cube_pos = lerp(cube_near.translation ,cube_end.translation ,dt*i)
-        oMcube = pin.SE3(R, cube_pos)
-        setcubeplacement(robot, cube, oMcube)
-        q, success = computeqgrasppose(robot, q_prev, cube, oMcube)
+        cube_pos = lerp(cube_near.translation, cube_end.translation, dt*i)
+        cube_i = pin.SE3(R, cube_pos)
+        setcubeplacement(robot, cube, cube_i)
+        q, success = computeqgrasppose(robot, robot.q0, cube, cube_i)
         cube_ok = not pin.computeCollisions(cube.collision_model, cube.collision_data, False)
         
         if not (success and cube_ok):
+            print("collision")
             flag = False
             break
         # collision free
-        path.append((q, oMcube))
-        
+        path.append((q, cube_i))
+    print("Path section length : ", len(path))   
     return path, flag
  
 
@@ -138,15 +142,16 @@ def rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
     """ This is the RRT algorithm engine """
     G = [(None, qinit, cubeplacementq0)]    # each node of graph stores (Parent, configuration, cube position)
     k = 1000    # number of nodes. Can be adjusted
-    delta_q = 1
-    discretisationsteps = 100
+    delta_q = 0.2
+    discretisationsteps = 80
 
     for _ in range(k):
-        print("Graph: ", G)
-        q_rand, oMcube = RAND_CONF(robot, q, cube)
-        cube_near_index = NEAREST_VERTEX(G, oMcube)
-        cube_near = G[cube_near_index][2]   
-        new_G_section, _ = NEW_CONF(cube_near, oMcube, q_rand, discretisationsteps, delta_q)    
+        print("Graph length =", len(G))
+        q_rand, cube_rand = RAND_CONF(robot, q, cube)
+        cube_near_index = NEAREST_VERTEX(G, cube_rand)
+        _, q_near, cube_near = G[cube_near_index]   
+        new_G_section, _ = NEW_CONF(cube_near, cube_rand, q_near, discretisationsteps, delta_q)    
+        if new_G_section == []: continue
         ADD_PATH_SECTION(G, cube_near_index, new_G_section)
         q_new, cube_new = new_G_section[-1][0], new_G_section[-1][1], 
         to_goal_section, flag = VALID_EDGE(cube_new, cubeplacementqgoal, q_new, discretisationsteps)
@@ -194,7 +199,8 @@ def displaypath(robot, path, cube_path, dt, viz):
     for i, q in enumerate(path):
         setcubeplacement(robot, cube, cube_path[i])
         viz.display(q)
-        time.sleep(dt)
+        #print("step, ", q)
+        #time.sleep(0.000001)
 
 
 if __name__ == "__main__":
@@ -202,7 +208,7 @@ if __name__ == "__main__":
     from config import CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET
     from inverse_geometry import computeqgrasppose
     
-    robot, cube, viz = setupwithmeshcat("tcp://127.0.0.1:6001")
+    robot, cube, viz = setupwithmeshcat("tcp://127.0.0.1:6000")
     
     
     q = robot.q0.copy()
@@ -214,5 +220,5 @@ if __name__ == "__main__":
     
     path, cube_path = computepath(q0, qe, CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET)
     
-    displaypath(robot,path,cube_path,dt=0.1,viz=viz) #you ll probably want to lower dt
+    displaypath(robot,path,cube_path, dt=0.5, viz=viz) #you ll probably want to lower dt
     

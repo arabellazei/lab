@@ -154,7 +154,7 @@ def rrt(qinit, qgoal, cubeplacementq0, cubeplacementqgoal):
 
     for _ in range(k):
         print("Graph: ", G)
-        q_rand, oMcube = RAND_CONF(robot, q, cube, viz)
+        q_rand, oMcube = RAND_CONF(robot, q, cube)
         q_near_index = NEAREST_VERTEX(G, q_rand)
         q_near = G[q_near_index][1]   
         q_new = NEW_CONF(q_near,q_rand,discretisationsteps, delta_q)    
