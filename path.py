@@ -202,7 +202,7 @@ if __name__ == "__main__":
     from config import CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET
     from inverse_geometry import computeqgrasppose
     
-    robot, cube, viz = setupwithmeshcat("tcp://127.0.0.1:6000")
+    robot, cube, viz = setupwithmeshcat()
     
     
     q = robot.q0.copy()
@@ -215,4 +215,4 @@ if __name__ == "__main__":
     path, cube_path = computepath(robot, cube, q0, qe, CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET)
     
     displaypath(robot, cube, path, cube_path, dt=0.5, viz=viz) #you ll probably want to lower dt
-    save_path("saved_rrt_path.npz", path, cube_path)
+    #save_path("saved_rrt_path.npz", path, cube_path) # for testing control.py

@@ -118,7 +118,7 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
 if __name__ == "__main__":
     from tools import setupwithmeshcat
     from setup_meshcat import updatevisuals
-    robot, cube, viz = setupwithmeshcat(url="tcp://127.0.0.1:6000")
+    robot, cube, viz = setupwithmeshcat()
     
     q = robot.q0.copy()
     

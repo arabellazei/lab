@@ -45,7 +45,7 @@ def controllaw(sim, robot, trajs, tcurrent, cube):
 
     # Computed torque
     tau_track = M.dot(a_cmd) + h
-    
+
     # Send to simulator
     sim.step(tau_track.tolist())
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     
     q0,successinit = computeqgrasppose(robot, robot.q0, cube, CUBE_PLACEMENT, None)
     qe,successend = computeqgrasppose(robot, robot.q0, cube, CUBE_PLACEMENT_TARGET,  None)
-    # path, cube_path = computepath(robot, cube, q0, qe, CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET)
+    path, cube_path = computepath(robot, cube, q0, qe, CUBE_PLACEMENT, CUBE_PLACEMENT_TARGET)
 
     def fix_path(path, cube_path, max_points):
         qs = np.array(path)
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
         return new_path, cube_sparse
 
-    path, cube_path = load_path("saved_rrt_path.npz")
+    #path, cube_path = load_path("saved_rrt_path.npz")
     path, cube_path = fix_path(path, cube_path, max_points=300)
 
 
