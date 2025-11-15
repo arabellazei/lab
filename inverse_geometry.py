@@ -17,21 +17,6 @@ from setup_meshcat import updatevisuals
 
 from tools import setcubeplacement
 
-import quadprog
-
-def solve_qp(H, f, lb, ub):
-    # quadprog solves: min 1/2 xᵀ H x - bᵀ x
-    # so we pass b = -f
-    n = H.shape[0]
-
-    # inequality: lb <= x <= ub   →   Gx ≤ h
-    G = np.vstack(( np.eye(n), -np.eye(n) ))
-    h = np.hstack(( ub, -lb ))
-
-    sol = quadprog.solve_qp(H, -f, G.T, h)[0]
-    return sol
-
-
 def damped_pinv(J, lam=1e-3):
     # 6xnv Jacobian -> nvx6 pseudo-inverse with Tikhonov damping
     # J# = J^T ( J J^T + lam^2 I )^{-1}
@@ -49,18 +34,17 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
     LAMBDA = 1e-4   # Damping for pseudoinverse
 
     # convergence thresholds
-    TOL_ROT = 2e-2
-    TOL_LIN = 2e-3
+    TOL_ROT = 1e-3
+    TOL_LIN = 1e-3
     MAX_IT = 60
     
-    oMcubeL = getcubeplacement(cube, LEFT_HOOK) #placement of the left hand hook
-    oMcubeR = getcubeplacement(cube, RIGHT_HOOK) #placement of the right hand hook
+    oMcubeL = getcubeplacement(cube, LEFT_HOOK) # placement of the left hand hook
+    oMcubeR = getcubeplacement(cube, RIGHT_HOOK) # placement of the right hand hook
 
     IDX_RARM = robot.model.getFrameId(RIGHT_HAND)
     IDX_LARM = robot.model.getFrameId(LEFT_HAND)
 
     q = qcurrent.copy()
-    # q = robot.q0.copy()
     herr_r = [] # Log the value of the error between right hand and right target.
     herr_l = [] # Log the value of the error between left hand and left target.
     
@@ -107,7 +91,6 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         left_Jleft = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_LARM, pin.ReferenceFrame.LOCAL)
         right_Jright = pin.computeFrameJacobian(robot.model, robot.data, q, IDX_RARM, pin.ReferenceFrame.LOCAL)
         
-        #-------
         # Primary task (right hand)
         JR = damped_pinv(right_Jright, LAMBDA)
         vq = JR @ vstar_R
@@ -118,16 +101,13 @@ def computeqgrasppose(robot, qcurrent, cube, cubetarget, viz=None):
         # Secondary task (left hand)
         left_Jleft_Pright = left_Jleft @ Pright
         JL = damped_pinv(left_Jleft_Pright, LAMBDA)
-        #vq += - pinv(JL @ Pright) @ (left_nu + JL @ vq)
         vq += Pright @ (JL @ (vstar_L - left_Jleft @ vq))
-        #-------
 
         q = pin.integrate(robot.model, q, vq * DT)
         q = projecttojointlimits(robot, q)
 
         if viz is not None:
             viz.display(q)
-        #time.sleep(1e-3)
 
         herr_r.append(right_nu)
         herr_l.append(left_nu) 
