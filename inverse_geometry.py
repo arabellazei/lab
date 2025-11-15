@@ -18,8 +18,6 @@ from setup_meshcat import updatevisuals
 from tools import setcubeplacement
 
 def damped_pinv(J, lam=1e-3):
-    # 6xnv Jacobian -> nvx6 pseudo-inverse with Tikhonov damping
-    # J# = J^T ( J J^T + lam^2 I )^{-1}
     JJt = J @ J.T
     return J.T @ inv(JJt + (lam**2) * np.eye(J.shape[0]))
 
